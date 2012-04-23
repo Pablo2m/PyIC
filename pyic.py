@@ -409,7 +409,9 @@ class irc_client:
                            serverpasswd = None ):
                                
         self.sock = socket.socket( socket.AF_INET, socket.SOCK_STREAM )
-        
+        if ssl:
+			import ssl
+			self.sock = ssl.wrap_socket(self.sock)
         self.sock.connect(( self.server, self.port ))
         
         if ( serverpasswd != None ):
@@ -435,6 +437,7 @@ class irc_client:
                   nick,
                   server,
                   port = 6667,
+				  ssl = False
                   username = "user",
                   username2 = "user",
                   fullname = "user Name",
@@ -444,6 +447,7 @@ class irc_client:
         self.nick = nick
         self.server = server
         self.port = port
+		self.ssl = ssl
         self.username = username
         self.username2 = username2
         self.fullname = fullname
