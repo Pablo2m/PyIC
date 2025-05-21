@@ -11,18 +11,18 @@ channel = "#bot_testing" # IRC channel
 greet = "Hello"
 topic = "PyIC testing"
 
-print "Connecting..."
+print("Connecting...")
 
 irc = irc_client( botName, server ) # Connect
 
-print "Message of the day:"
-print irc.get_motd( )
+print("Message of the day:")
+print(irc.get_motd( ))
 
-print "Reading channel list"
-print len( irc.get_channels( ) ), "channels"
+print("Reading channel list")
+print(len( irc.get_channels( ) ), "channels")
 
 
-print "Joining", channel
+print("Joining", channel)
 irc.join( channel ) # Joins the channel
 
 irc.notice( channel, greet + " " + channel ) # talks to the channel
@@ -32,19 +32,19 @@ irc.notice( channel, greet + " " + channel ) # talks to the channel
 for usr in irc.get_users( channel ):
     
     
-    print '"' + usr + '" data'
+    print('"' + usr + '" data')
     
-    print irc.whois( clean_usr( usr ) ) # Shows the user data
+    print(irc.whois( clean_usr( usr ) )) # Shows the user data
     
     irc.notice( channel, greet + " " + usr ) # talks to the user
 
 
-print "Setting channel topic"
+print("Setting channel topic")
 irc.set_topic( channel, topic )
 
-print "Topic:", irc.get_topic( channel )
+print("Topic:", irc.get_topic( channel ))
 
-print "Waiting for users..."
+print("Waiting for users...")
 # Greets who enters the channel
 while ( True ):
     
@@ -54,6 +54,6 @@ while ( True ):
     
         if ( msg.by != botName ):
 
-            print "'" + msg.by + "'", "has arrived"
+            print("'" + msg.by + "'", "has arrived")
             irc.notice( channel, greet + " " + msg.by )
-            print irc.whois( msg.by )
+            print(irc.whois( msg.by ))

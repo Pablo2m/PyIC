@@ -16,28 +16,28 @@
 
 from threading import Thread
 import socket
+import struct
 
 
 # For sending 4 byte's throught a socket
-def int2uint4( n ):
-    u = ""
-    for i in range( 0, 4 ):
-            u = chr(n % 256) + u
-            n /= 256
-    return u
+def int2uint4(n):
+    """Converts an integer to a 4-byte big-endian string using struct.pack."""
+    # Pack as an unsigned integer (I) in big-endian format (>)
+    return struct.pack('>I', n)
 
 ########################################################################
 # DCC download thread
-class dcc_download( Thread ):
+class dcc_download(Thread):
+    """Handles a DCC file download in a separate thread."""
     
     ####################################################################
     # Constructor
-    def __init__( self, 
-                  msg,
-                  func = None,
-                  buffsize = 1024 ):
-
-        Thread.__init__( self )
+    def __init__(self, 
+                 msg,  # irc_msg object containing DCC offer details
+                 func=None,  # Optional callback function after download
+                 buffsize=1024):
+        """Initializes the DCC download thread."""
+        Thread.__init__(self)
                       
         self.buffsize = buffsize
         self.turbo = msg.turbo
@@ -52,7 +52,11 @@ class dcc_download( Thread ):
     ####################################################################
     # Here starts the thread
     def run(self):
-        
+        """
+        Main execution method for the download thread. 
+        Connects to the sender, receives data, and writes it to the specified file.
+        Handles both standard and turbo DCC sends.
+        """
         sock = socket.socket( socket.AF_INET, socket.SOCK_STREAM )
         
         sock.connect(( self.ip, self.port ))
@@ -64,7 +68,9 @@ class dcc_download( Thread ):
                 try:
                     r_size += len(c)
                     sock.send(int2uint4(len(c)))
-                except:
+                except socket.error as e:
+                    # Using print for logging as no formal logger is set up
+                    print(f"Socket error during DCC send acknowledgment: {e}")
                     break
                     
             if ( len( c ) < 1 ):
@@ -84,27 +90,41 @@ class dcc_download( Thread ):
 
 ########################################################################
 # Cleans the message
-def clean_msg( s ):
-    for c in range( 1, 10 ):
-        s = s.replace( ord( c ) ,'' )
+def clean_msg(s):
+    """Removes specific ASCII control characters (values 1-9) from a string."""
+    for c in range(1, 10):
+        s = s.replace(chr(c), '')
     return s
 
 ########################################################################
 # Converts a port number to a string
-def ntop( i ):
+def ntop(i):
+    """Converts a 32-bit integer IP address to its dotted-quad string representation."""
     ip = ""
-    ip += str(( i / 16777216 ) % 256 ) + "."
-    ip += str(( i / 65536) %256 ) + "."
-    ip += str(( i / 256) % 256 ) + "."
+    # Use integer division //
+    ip += str(( i // 16777216 ) % 256 ) + "."
+    ip += str(( i // 65536) %256 ) + "."
+    ip += str(( i // 256) % 256 ) + "."
     ip += str( i % 256 )
     return ip
 
 ########################################################################
 # Get DCC offer
-def decompose_dcc_offer( m ):
+def decompose_dcc_offer(m):
+    """
+    Parses a DCC SEND or DCC TSEND command string to extract parameters.
+    Expected format: "DCC <SEND|TSEND> <filename> <ip_int> <port> [size]"
+    Filename can be quoted. Size is optional.
+    Returns a tuple (ip_str, port, filename, turbo_bool, size_int) or False on error.
+    """
+    # DCC command strings are typically like:
+    # "DCC SEND <filename> <ip_integer> <port> <size>"
+    # "DCC SEND \"<filename with spaces>\" <ip_integer> <port> <size>"
+    # "DCC TSEND ..." (turbo send, no acknowledgments)
+    # Size is optional for some clients.
 
     if ( "DCC SEND" in m ):
-        l = m.index( "DCC SEND" )
+        l = m.index( "DCC SEND" ) # Find start of relevant part
         turbo = False
 
     else:
