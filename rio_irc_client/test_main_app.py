@@ -190,6 +190,98 @@ class TestRioIrcClientApp(unittest.TestCase):
         self.assertIn("UserA", self.app.user_list)
         self.assertTrue(any("UserToKick was kicked from #channel1" in msg['text'] for msg in self.app.chat_messages))
 
+    def test_do_send_ui_message_with_slash_commands(self):
+        self.mock_irc_manager_instance.is_connected = True
+        self.app.current_channel = "#testchannel"
+        
+        commands_to_test = [
+            "/me dances",
+            "/nick NewShinyNick",
+            "/whois SomeOtherUser"
+        ]
+        
+        for cmd in commands_to_test:
+            self.mock_irc_manager_instance.process_input.reset_mock() # Reset before each call
+            self.app.message_input = cmd
+            self.app.do_send_ui_message()
+            # process_input is called on the app's irc_manager instance, which is our mock
+            self.mock_irc_manager_instance.process_input.assert_called_with("#testchannel", cmd)
+
+    def test_event_self_action_display(self):
+        self.app.nickname = "MyOwnNick" # Ensure app's nickname state is set
+        event = {'type': 'SELF_ACTION', 'by': 'MyOwnNick', 'to': '#general', 'message': 'is doing a self action'}
+        self.app._process_irc_event_in_main_thread(event)
+        
+        self.assertEqual(len(self.app.chat_messages), 1)
+        last_msg = self.app.chat_messages[0]
+        self.assertEqual(last_msg['text'], '* MyOwnNick is doing a self action')
+        self.assertTrue(last_msg.get('is_action'))
+        self.assertEqual(last_msg['channel'], '#general')
+
+    def test_whois_data_aggregation_and_display(self):
+        # Simulate starting a WHOIS query
+        # In the actual app, this is triggered by IRCManager's status message after /whois
+        self.app.whois_query_nick = "TargetUser"
+        self.app.current_whois_data = {'nick': "TargetUser"}
+        self.app.current_channel = "#current" # Context for logging
+
+        # RPL_WHOISUSER (311)
+        # pyic params: [<nick>, <user>, <host>, <*>] Message: <real_name>
+        event_user = {'type': '311', 'params': ['TargetUser', 't_user', 't_host', '*'], 'message': 'Real Name Is This'}
+        self.app._process_irc_event_in_main_thread(event_user)
+        self.assertEqual(self.app.current_whois_data.get('real_name'), 'Real Name Is This')
+        self.assertEqual(self.app.current_whois_data.get('user'), 't_user')
+        self.assertEqual(self.app.current_whois_data.get('host'), 't_host')
+
+
+        # RPL_WHOISCHANNELS (319)
+        # pyic params: [<nick>] Message: <channel_list e.g., "@#chan1 #chan2">
+        event_channels = {'type': '319', 'params': ['TargetUser'], 'message': '@#channel1 #channel2'}
+        self.app._process_irc_event_in_main_thread(event_channels)
+        self.assertIn('@#channel1', self.app.current_whois_data.get('channels', []))
+        self.assertIn('#channel2', self.app.current_whois_data.get('channels', []))
+
+        # RPL_ENDOFWHOIS (318)
+        # pyic params: [<nick>] Message: <text like "End of /WHOIS list.">
+        event_end = {'type': '318', 'params': ['TargetUser'], 'message': 'End of /WHOIS list.'}
+        initial_msg_count = len(self.app.chat_messages)
+        self.app._process_irc_event_in_main_thread(event_end)
+        
+        # Check that chat_messages contains WHOIS summary
+        self.assertTrue(len(self.app.chat_messages) > initial_msg_count + 2) # At least title, one data line, end line
+        
+        # Consolidate chat messages for checking
+        logged_whois_info = "\n".join([msg['text'] for msg in self.app.chat_messages[initial_msg_count:]])
+        
+        self.assertIn("--- WHOIS results for TargetUser ---", logged_whois_info)
+        self.assertIn("Nick: TargetUser", logged_whois_info)
+        self.assertIn("Real Name: Real Name Is This", logged_whois_info)
+        self.assertIn("User: t_user@t_host", logged_whois_info)
+        self.assertIn("Channels: @#channel1 #channel2", logged_whois_info)
+        self.assertIn("--- End of WHOIS ---", logged_whois_info)
+        
+        self.assertIsNone(self.app.whois_query_nick)
+        self.assertEqual(self.app.current_whois_data, {})
+
+    def test_whois_error_no_such_nick(self):
+        self.app.whois_query_nick = "NonExistent"
+        self.app.current_whois_data = {'nick': "NonExistent"}
+        self.app.current_channel = "#chat"
+
+        # ERR_NOSUCHNICK (401)
+        # pyic params: [<queried_nick_attempt>] Message: <error_message>
+        event_error = {'type': '401', 'params': ['NonExistent'], 'message': 'No such nick/channel'}
+        initial_msg_count = len(self.app.chat_messages)
+        self.app._process_irc_event_in_main_thread(event_error)
+
+        self.assertTrue(len(self.app.chat_messages) > initial_msg_count)
+        last_msg = self.app.chat_messages[-1] # Assuming error is the last message added
+        self.assertTrue(last_msg.get('is_error'))
+        self.assertIn("WHOIS Error for NonExistent: No such nick/channel", last_msg['text'])
+        
+        self.assertIsNone(self.app.whois_query_nick)
+        self.assertEqual(self.app.current_whois_data, {})
+
 if __name__ == '__main__':
     # This allows running the tests directly from this file.
     unittest.main()

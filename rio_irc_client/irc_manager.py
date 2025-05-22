@@ -80,20 +80,52 @@ class IRCManager:
                         self.ui_callback({'type': 'error', 'message': 'Connection lost unexpectedly (received None).'})
                     break
 
+                # Handle CTCP PING explicitly
+                if msg_object.ctcp:
+                    ctcp_parts = msg_object.ctcp_msg.upper().split(" ", 1)
+                    ctcp_command = ctcp_parts[0]
+                    # ctcp_args_upper = ctcp_parts[1] if len(ctcp_parts) > 1 else "" # Not used directly for PING reply arg
+
+                    if ctcp_command == "PING":
+                        # Respond to CTCP PING
+                        # The sender of the PRIVMSG (msg_object.by) is who we reply to.
+                        # The content of the PING (argument) should be sent back in the PONG.
+                        reply_arg = msg_object.ctcp_msg.split(" ", 1)[1] if " " in msg_object.ctcp_msg else ""
+                        # CTCP PONG reply is sent via NOTICE
+                        # Format: NOTICE <target_nick> :\x01PONG <timestamp_or_arg>\x01
+                        pong_reply_string = f"NOTICE {msg_object.by} :\x01PONG {reply_arg}\x01\r\n"
+                        try:
+                            if self.irc_client and self.irc_client.sock:
+                                self.irc_client.sock.sendall(pong_reply_string.encode('utf-8', 'ignore'))
+                            # Optionally log this event to UI if needed for debugging
+                            # self.ui_callback({'type': 'debug', 'message': f"Responded to CTCP PING from {msg_object.by} with PONG {reply_arg}"})
+                        except Exception as e:
+                            self.ui_callback({'type': 'error', 'message': f"Failed to send CTCP PONG: {e}"})
+                        continue # Don't process this PRIVMSG further as a normal message for UI
+
+                    elif ctcp_command == "VERSION":
+                        # This is already handled by pyic.getmsg() calling self.irc_client.sendVer()
+                        # No action needed here, but we acknowledge it.
+                        # self.ui_callback({'type': 'debug', 'message': f"CTCP VERSION request from {msg_object.by} handled by pyic."})
+                        # It will still be passed to UI as a CTCP message, which is fine.
+                        pass # Let it fall through to the UI callback
+
                 event = {
                     'type': msg_object.type,
                     'by': msg_object.by,
                     'origin': msg_object.origin,
                     'to': msg_object.to,
-                    'message': msg_object.msg,
+                    'message': msg_object.msg, # This is the full message part, e.g., "\x01ACTION dances\x01" for CTCP
                     'raw': msg_object.raw,
-                    'is_private': msg_object.private,
+                    'is_private': getattr(msg_object, 'private', False), # pyic's irc_msg doesn't set this explicitly, but good to have
                     'ctcp': msg_object.ctcp,
-                    'ctcp_msg': msg_object.ctcp_msg,
+                    'ctcp_msg': msg_object.ctcp_msg if msg_object.ctcp else "", # This is the inner content, e.g. "ACTION dances"
+                    'params': getattr(msg_object, 'params', []), # Pass params if available
+                    'kicked': getattr(msg_object, 'kicked', None) # Pass kicked if available
                 }
                 self.ui_callback(event)
 
-        except ConnectionRefusedError:
+        except ConnectionRefusedError: # This might be redundant if connect() handles it, but good for loop-time issues
             self.ui_callback({'type': 'error', 'message': f"Connection refused by {self.server}:{self.port}"})
         except socket.gaierror:
             self.ui_callback({'type': 'error', 'message': f"Could not resolve server name: {self.server}. Please check the address and your network."})
@@ -207,12 +239,92 @@ class IRCManager:
         self.ui_callback({'type': 'error', 'message': 'Not connected. Cannot send message.'})
         return False
 
-    def send_private_message(self, nick: str, message: str):
+    def send_private_message(self, nick: str, message: str): # Kept for direct use
         if self.is_connected and self.irc_client:
             self.irc_client.sendmsg(nick, message)
             return True
         self.ui_callback({'type': 'error', 'message': 'Not connected. Cannot send message.'})
         return False
+
+    def process_input(self, target: str, user_input: str):
+        if not self.is_connected or not self.irc_client:
+            self.ui_callback({'type': 'error', 'message': 'Not connected.'})
+            return False
+
+        parts = user_input.split(" ", 1)
+        command = parts[0].lower()
+        args = parts[1] if len(parts) > 1 else ""
+
+        if command.startswith("/"):
+            if command == "/me":
+                if args:
+                    ctcp_action_string = f"\x01ACTION {args}\x01"
+                    self.irc_client.sendmsg(target, ctcp_action_string)
+                    # Callback for UI to display own action optimistically
+                    self.ui_callback({
+                        'type': 'self_action', # Distinguish from incoming actions
+                        'by': self.nick, 
+                        'to': target, 
+                        'message': args 
+                    })
+                    return True
+                else:
+                    self.ui_callback({'type': 'error', 'message': 'Usage: /me <message>'})
+                    return False
+            
+            elif command == "/nick":
+                if args:
+                    new_nickname = args.strip()
+                    self.irc_client.change_nick(new_nickname)
+                    # Server will send a NICK message back, which main.py handles.
+                    # We can also send an optimistic status message.
+                    self.ui_callback({'type': 'status', 'message': f"Attempting to change nick to: {new_nickname}"})
+                    return True
+                else:
+                    self.ui_callback({'type': 'error', 'message': 'Usage: /nick <new_nickname>'})
+                    return False
+
+            elif command == "/whois":
+                if args:
+                    queried_nickname = args.strip()
+                    self.irc_client.send_whois(queried_nickname)
+                    self.ui_callback({'type': 'status', 'message': f"Requesting WHOIS for: {queried_nickname}"})
+                    return True
+                else:
+                    self.ui_callback({'type': 'error', 'message': 'Usage: /whois <nickname>'})
+                    return False
+            
+            # Add other slash commands here in the future e.g. /join, /part, /query
+            elif command == "/join":
+                 if args:
+                    self.join_channel_action(args.strip()) # Use existing method
+                    return True
+                 else:
+                    self.ui_callback({'type': 'error', 'message': 'Usage: /join <#channel>'})
+                    return False
+            elif command == "/part":
+                 if args:
+                    self.part_channel_action(args.strip()) # Use existing method
+                    return True
+                 else: # Part current channel if no args
+                    if target and (target.startswith("#") or target.startswith("&")):
+                        self.part_channel_action(target)
+                        return True
+                    else:
+                        self.ui_callback({'type': 'error', 'message': 'Usage: /part <#channel> or use in a channel context.'})
+                        return False
+
+
+            else: # Unknown slash command
+                self.ui_callback({'type': 'error', 'message': f"Unknown command: {command}"})
+                return False
+        
+        else: # Regular message
+            self.irc_client.sendmsg(target, user_input)
+            # UI currently handles optimistic display of own messages.
+            # If we wanted manager to confirm, add a callback here:
+            # self.ui_callback({'type': 'self_message', 'by': self.nick, 'to': target, 'message': user_input})
+            return True
 
     def join_channel_action(self, channel: str):
         if self.is_connected and self.irc_client:
