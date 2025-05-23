@@ -54,6 +54,28 @@ class irc_msg(object):
     and parses it into its constituent parts: sender (nick and origin),
     command/type, target, and the actual message content. It also handles
     CTCP messages (including DCC offers) and flags for multiline responses.
+
+    Attributes:
+        raw_bytes (bytes): The original raw byte string received from the server.
+        raw (str): The UTF-8 decoded string version of `raw_bytes`.
+        by (str): The sender's nickname (e.g., "SomeUser").
+        origin (str): The sender's full origin (e.g., "user@host.com").
+        type (str): The IRC command or numeric reply code (e.g., "PRIVMSG", "JOIN", "372").
+        to (str): The target of the message, often a channel ("#channel") or the client's nick.
+        msg (str): The actual message content or parameters of a command.
+        ctcp (bool): True if the message is a CTCP (Client-To-Client Protocol) message.
+        ctcp_msg (str): The content of the CTCP message if `ctcp` is True.
+        multiline (bool): True if this message's `type` is part of a known multiline sequence
+                          (e.g., MOTD, WHOIS).
+        multiline_end (bool): True if this message's `type` signals the end of a multiline sequence.
+        
+        # DCC (Direct Client-to-Client) specific attributes:
+        # These are populated if the message is a DCC offer parsed successfully.
+        ip (str): IP address for the DCC connection, if a DCC offer. Defaults to "".
+        port (int): Port number for the DCC connection, if a DCC offer. Defaults to 0.
+        file (str): Filename offered for DCC, if applicable. Defaults to "".
+        turbo (bool): True if DCC TSEND (turbo mode) is offered. Defaults to False.
+        size (int): Size of the file offered for DCC. Defaults to 0.
     """
 
     ####################################################################
@@ -68,7 +90,15 @@ class irc_msg(object):
     multiline_end = False
     ctcp = False
     ctcp_msg = ""
+    raw_bytes = b"" # Initialize raw_bytes as bytes
     raw = ""
+    
+    # DCC specific attributes initialized
+    ip = ""
+    port = 0
+    file = ""
+    turbo = False
+    size = 0
     
     ####################################################################
     # Constructor
@@ -85,18 +115,13 @@ class irc_msg(object):
         Args:
             s_bytes (bytes): The raw byte string received from the IRC server.
         """
-        self.raw_bytes = s_bytes
+        self.raw_bytes = s_bytes # Store original bytes
         s = s_bytes.decode('utf-8', errors='replace') # s is now a string for parsing
         self.raw = s # Store the decoded string version of the raw message
                       
-        # Initialize all fields to default/empty states
-        self.by = ""
-        self.origin = ""
-        self.type = ""
-        self.to = ""
-        self.msg = ""
-        # self.multiline and self.multiline_end are set by class default
-        # self.ctcp and self.ctcp_msg are set by class default
+        # Attributes like by, origin, type, etc., are initialized at class level.
+        # Re-setting msg to empty here to ensure it's cleared for each new parse.
+        self.msg = "" 
 
         # Extracting "FROM" (prefix part of the message)
         if ( s.startswith(":") ): # Use startswith for clarity
@@ -205,13 +230,14 @@ class irc_msg(object):
             dcc_params = decompose_dcc_offer(self.ctcp_msg) # self.ctcp_msg is a string
             
             if dcc_params: # If decompose_dcc_offer returned valid parameters
-                self.ip = dcc[ 0 ]
-                self.port = dcc[ 1 ]
-                self.file = ""
-                self.turbo = dcc[ 3 ]
-                self.size = dcc_params[4] # Corrected from dcc[4] to dcc_params[4]
+                # dcc_params is (ip_str, port, filename, turbo_bool, size_int)
+                self.ip = dcc_params[0]
+                self.port = dcc_params[1]
+                # self.file is already "", so += is fine.
+                self.turbo = dcc_params[3]
+                self.size = dcc_params[4]
                 try:
-                    self.file += dcc_params[2]
+                    self.file += dcc_params[2] # Append filename component
                 except (TypeError, IndexError) as e:
                     logger.error(f"Error processing DCC filename component '{dcc_params[2]}': {e}")
                     # self.file remains as initialized (""), DCC offer might be unusable

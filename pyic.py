@@ -26,15 +26,37 @@ import ssl # Moved import ssl to the top
 
 VERSION = "PyIC 0.2"
 
-def clean_usr( usr ):
-    return usr.replace( "@", "" )
+def clean_usr(usr):
+    """
+    Removes common prefix characters (like '@') from a user nick.
+
+    Args:
+        usr (str): The user nickname, possibly prefixed (e.g., "@nickname").
+
+    Returns:
+        str: The cleaned nickname.
+    """
+    return usr.replace( "@", "" ) # Simple replacement, can be expanded if other prefixes are common.
 
 # Retrieve a single line from the socket
 def getline(sock):
     """
     Reads a single line (ending in b'\\n') from a socket.
-    Handles potential connection closure and strips b'\\r'.
-    Returns a bytes object.
+
+    This function reads byte by byte from the socket until a newline character
+    (b'\\n') is encountered. It handles potential connection closure by the peer
+    and strips carriage return characters (b'\\r').
+
+    Args:
+        sock (socket.socket): The socket object to read from.
+
+    Returns:
+        bytes: The raw line read from the socket, excluding the newline
+               and any carriage returns.
+
+    Raises:
+        socket.error: If a socket error occurs during recv (e.g., connection
+                      reset) or if the connection is closed by the peer.
     """
     l = b"" # Initialize as bytes
     while 1:
@@ -69,15 +91,30 @@ class irc_client(object):
     
     ####################################################################
     # Shows Message Of The Day
-    def get_motd( self ):
+    def get_motd(self):
+        """
+        Returns the Message Of The Day (MOTD) received from the server.
+
+        The MOTD is accumulated during the initial connection phase.
+
+        Returns:
+            str: The MOTD as a multi-line string.
+        """
         return self.motd
 
     ####################################################################
     # Set's channel mode
-    def set_chanmode( self,
-                      channel,
-                      mode,
-                      data = None ):
+    def set_chanmode(self, channel, mode, data=None):
+        """
+        Sets a mode on a channel.
+
+        Args:
+            channel (str): The target channel (e.g., "#mychannel").
+            mode (str): The mode string to apply (e.g., "+m", "-o nick").
+            data (str, optional): Additional data for the mode, if required
+                                  (e.g., a nickname for modes like +o).
+                                  Defaults to None.
+        """
         if data is None: # Pythonic check for None
             self.sock.send(f"MODE {channel} {mode}\r\n".encode('utf-8'))
         else:
@@ -85,15 +122,28 @@ class irc_client(object):
 
     ####################################################################
     # Set's user own mode
-    def set_mode( self, 
-                  mode ):
+    def set_mode(self, mode):
+        """
+        Sets a user mode for the client's own nickname.
+
+        Args:
+            mode (str): The mode string to apply (e.g., "+i" for invisible).
+        """
         self.sock.send(f"MODE {self.nick} {mode}\r\n".encode('utf-8'))
 
     ####################################################################
     # Send's a ping to a server or user 
     # (have to check messages for the answer)
-    def ping( self,
-              to ):
+    def ping(self, to):
+        """
+        Sends a PING command to a target (server or user).
+
+        The recipient should respond with a PONG. This is often used to check
+        if a user is still connected or to measure lag to the server.
+
+        Args:
+            to (str): The target of the PING (e.g., a server name or a nickname).
+        """
         self.sock.send(f"PING {to}\r\n".encode('utf-8'))
 
     ####################################################################
@@ -173,8 +223,16 @@ class irc_client(object):
 
     ####################################################################
     # Ask's for user information
-    def send_whois( self,
-                    user ):
+    def send_whois(self, user):
+        """
+        Sends a WHOIS command to the server for a specified user.
+
+        This is typically an internal helper method; `whois()` is the
+        public interface for fetching and parsing WHOIS data.
+
+        Args:
+            user (str): The nickname of the user to query.
+        """
         self.sock.send(f"WHOIS {user}\r\n".encode('utf-8'))
 
     ####################################################################
@@ -187,7 +245,10 @@ class irc_client(object):
             user (str): The nickname of the user to query.
 
         Returns:
-            dict: A dictionary containing the WHOIS information.
+            dict: A dictionary containing the WHOIS information. 
+                  Keys might include 'nick', 'user', 'host', 'real_name', 
+                  'server', 'server_info', 'isOp', 'idle', 'signon', 'channels'.
+                  Presence of keys depends on server response and user status.
         """
         self.send_whois( user )
         
@@ -197,14 +258,31 @@ class irc_client(object):
 
     ####################################################################
     # Ask's for user (that no longer exists) information
-    def send_whowas( self,
-                     user ):
+    def send_whowas(self, user):
+        """
+        Sends a WHOWAS command to the server for a specified user.
+
+        WHOWAS queries information about a nickname that is no longer in use
+        (e.g., user quit or changed nick).
+
+        Args:
+            user (str): The nickname to query.
+        """
         self.sock.send(f"WHOWAS {user}\r\n".encode('utf-8'))
         
     ####################################################################
     # Reads for former user information
-    def whowas( self, 
-                user ):
+    def whowas(self, user):
+        """
+        Performs a WHOWAS query for a given user.
+
+        Args:
+            user (str): The nickname to query (must not be currently online).
+
+        Returns:
+            dict: A dictionary containing the WHOWAS information, similar in
+                  structure to `whois()` results.
+        """
         self.send_whowas( user )
         
         data = self.collect_who_data( )
@@ -213,22 +291,45 @@ class irc_client(object):
     
     ####################################################################
     # Set's a channel topic
-    def set_topic( self,
-                   channel,
-                   topic ):
+    def set_topic(self, channel, topic):
+        """
+        Sets the topic for a specified channel.
+
+        Requires appropriate channel privileges.
+
+        Args:
+            channel (str): The target channel (e.g., "#mychannel").
+            topic (str): The new topic string.
+        """
         self.sock.send(f"TOPIC {channel} :{topic}\r\n".encode('utf-8'))
 
     ####################################################################
     # Retrieves a channel topic (has to check messages then)
-    def retr_topic( self,
-                    channel ):
+    def retr_topic(self, channel):
+        """
+        Sends a TOPIC command to retrieve the topic of a channel.
+
+        This is typically an internal helper. `get_topic()` is the public
+        interface for fetching and returning the topic.
+
+        Args:
+            channel (str): The channel whose topic is to be retrieved.
+        """
         self.sock.send(f"TOPIC {channel}\r\n".encode('utf-8'))
 
     ####################################################################
     # Reads the current topic on a channel
-    def get_topic( self,
-                   channel ):
+    def get_topic(self, channel):
+        """
+        Retrieves the current topic of the specified channel.
 
+        Args:
+            channel (str): The name of the channel.
+
+        Returns:
+            str: The channel topic.
+            False: If no topic is set (RPL_NOTOPIC received).
+        """
         self.retr_topic( channel )
         while ( True ):
             m = self.getmsg( True )
@@ -243,8 +344,16 @@ class irc_client(object):
 
     ####################################################################
     # Retrieves a nick list
-    def retr_names( self,
-                    channel ):
+    def retr_names(self, channel):
+        """
+        Sends a NAMES command to list users in a channel.
+
+        This is typically an internal helper. `get_users()` is the public
+        interface for fetching and returning the user list.
+
+        Args:
+            channel (str): The channel whose user list is to be retrieved.
+        """
         self.sock.send(f"NAMES {channel}\r\n".encode('utf-8'))
 
     ####################################################################
@@ -280,7 +389,13 @@ class irc_client(object):
 
     ####################################################################
     # Retrieves a channel list
-    def retr_channels( self ):
+    def retr_channels(self):
+        """
+        Sends a LIST command to retrieve the list of channels.
+
+        This is typically an internal helper. `get_channels()` is the public
+        interface for fetching and returning the channel list.
+        """
         self.sock.send( "LIST\r\n".encode('utf-8') )
             
     ####################################################################
@@ -318,17 +433,29 @@ class irc_client(object):
 
     ####################################################################
     # Invites someone to a channel
-    def invite( self,
-                nick,
-                channel ):
+    def invite(self, nick, channel):
+        """
+        Invites a user to a channel.
+
+        Args:
+            nick (str): The nickname of the user to invite.
+            channel (str): The channel to invite the user to.
+        """
         self.sock.send(f"INVITE {nick} {channel}\r\n".encode('utf-8'))
 
     ####################################################################
     # Removes a user from a channel
-    def kick( self,
-              channel,
-              nick,
-              comment = None ):
+    def kick(self, channel, nick, comment=None):
+        """
+        Kicks a user from a channel.
+
+        Requires appropriate channel privileges.
+
+        Args:
+            channel (str): The channel from which to kick the user.
+            nick (str): The nickname of the user to kick.
+            comment (str, optional): A comment for the kick. Defaults to None.
+        """
         if comment is None:
             self.sock.send(f"KICK {channel} {nick}\r\n".encode('utf-8'))
         else:
@@ -336,14 +463,25 @@ class irc_client(object):
 
     ####################################################################
     # Quit the channel
-    def quit_channel( self,
-                      channel ):
+    def quit_channel(self, channel):
+        """
+        Leaves (parts) a specified channel.
+
+        Args:
+            channel (str): The channel to leave.
+        """
         self.sock.send(f"PART {channel}\r\n".encode('utf-8'))
 
     ####################################################################
     # Quit's the server
-    def quit( self,
-              msg = "Client quit" ):
+    def quit(self, msg="Client quit"):
+        """
+        Disconnects from the IRC server.
+
+        Args:
+            msg (str, optional): The quit message to send to the server.
+                                 Defaults to "Client quit".
+        """
         self.sock.send(f"QUIT :{msg}\r\n".encode('utf-8'))
         self.sock.close( )
 
@@ -369,14 +507,20 @@ class irc_client(object):
 
     ####################################################################
     # Changes the nickname
-    def change_nick( self,
-                     nick ):
+    def change_nick(self, nick):
+        """
+        Changes the client's nickname.
+
+        Args:
+            nick (str): The new nickname.
+        """
         self.nick = nick # Update internal nick tracking
         self.sock.send(f"NICK {nick}\r\n".encode('utf-8'))
 
     ####################################################################
     # Ask's for the MOTD
-    def refresh_motd( self ):
+    def refresh_motd(self):
+        """Sends a MOTD command to the server to refresh the Message of the Day."""
         self.sock.send( "MOTD\r\n".encode('utf-8') )
 
     ####################################################################
@@ -440,9 +584,16 @@ class irc_client(object):
 
     ####################################################################
     # Same as sendmsg, but MUSTN'T be answered
-    def notice( self,
-                to,
-                msg ):
+    def notice(self, to, msg):
+        """
+        Sends a NOTICE to a specified target (user or channel).
+
+        Notices are similar to PRIVMSGs but should not be automatically replied to.
+
+        Args:
+            to (str): The recipient (nickname or channel name).
+            msg (str): The message content to send.
+        """
         self.sock.send(f"NOTICE {to} :{msg}\r\n".encode('utf-8'))
 
     ####################################################################

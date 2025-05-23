@@ -37,10 +37,22 @@ class dcc_download(Thread):
     ####################################################################
     # Constructor
     def __init__(self, 
-                 msg,  # irc_msg object containing DCC offer details
-                 func=None,  # Optional callback function after download
+                 msg,
+                 func=None,
                  buffsize=1024):
-        """Initializes the DCC download thread."""
+        """
+        Initializes the DCC download thread.
+
+        Args:
+            msg (irc_msg): The `irc_msg` object containing parsed DCC offer
+                           details (e.g., `msg.file`, `msg.ip`, `msg.port`, 
+                           `msg.size`, `msg.turbo`).
+            func (callable, optional): A callback function to execute after the
+                                     download attempt (completes or fails).
+                                     Defaults to None.
+            buffsize (int, optional): The buffer size for socket receive
+                                      operations during download. Defaults to 1024.
+        """
         Thread.__init__(self)
                       
         self.buffsize = buffsize
@@ -59,7 +71,12 @@ class dcc_download(Thread):
         """
         Main execution method for the download thread. 
         Connects to the sender, receives data, and writes it to the specified file.
-        Handles both standard and turbo DCC sends.
+        Handles both standard and turbo DCC sends. The specified file is opened in
+        binary write mode ("wb").
+
+        Network operations (`connect`, `recv`, `send`) can raise `socket.error`.
+        The optional callback function `func` is called upon completion or error
+        if provided.
         """
         sock = socket.socket( socket.AF_INET, socket.SOCK_STREAM )
         
