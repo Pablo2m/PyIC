@@ -15,6 +15,23 @@ except ImportError:
         # This assumes 'rio_irc_client' is a package itself or added to sys.path
         from rio_irc_client.irc_manager import IRCManager
 
+# Color Palette (Dark Theme Example)
+COLOR_APP_BG = rio.Color.from_hex("#2B2B2B")
+COLOR_CONTAINER_BG = rio.Color.from_hex("#3C3F41")
+COLOR_CONTAINER_ALT_BG = rio.Color.from_hex("#45494A")
+COLOR_TEXT_PRIMARY = rio.Color.from_hex("#BBBBBB")
+COLOR_TEXT_SECONDARY = rio.Color.from_hex("#888888")
+COLOR_TEXT_ACCENT = rio.Color.from_hex("#4E8DFF") # Blue
+COLOR_TEXT_ERROR = rio.Color.from_hex("#FF5555") # Red
+COLOR_TEXT_WARNING = rio.Color.from_hex("#FFA726") # Orange
+COLOR_TEXT_SUCCESS = rio.Color.from_hex("#66BB6A") # Green
+COLOR_TEXT_SYSTEM = rio.Color.from_hex("#A0A0A0") # Muted gray
+COLOR_BORDER = rio.Color.from_hex("#555555")
+COLOR_BUTTON_PRIMARY_BG = COLOR_TEXT_ACCENT # Use accent blue
+COLOR_BUTTON_DANGER_BG = COLOR_TEXT_ERROR   # Use error red
+COLOR_BUTTON_SECONDARY_BG = COLOR_CONTAINER_ALT_BG # Use alt container gray
+COLOR_BUTTON_TEXT = rio.Color.from_hex("#FFFFFF") # White text for colored buttons
+
 
 class RioIrcClientApp(rio.App):
     def __init__(self, *args, **kwargs):
@@ -414,13 +431,27 @@ class RioIrcClientApp(rio.App):
 
     def build(self) -> rio.Component:
         connect_button_text = "Disconnect" if self.irc_manager.is_connected else "Connect"
+        connect_button_color_name = "danger" if self.irc_manager.is_connected else "primary"
+
         connection_bar = rio.Row(
-            rio.TextInput(text=self.server_address, label="Server", width=15),
-            rio.TextInput(text=self.server_port, label="Port", width=6),
-            rio.TextInput(text=self.nickname, label="Nickname", width=10),
-            rio.Button(connect_button_text, on_press=self.do_connect_disconnect, color="primary" if not self.irc_manager.is_connected else "danger"),
+            rio.TextInput(text=self.server_address, label="Server", width=15, style=rio.TextStyle(color=COLOR_TEXT_PRIMARY), label_style=rio.TextStyle(color=COLOR_TEXT_SECONDARY)),
+            rio.TextInput(text=self.server_port, label="Port", width=6, style=rio.TextStyle(color=COLOR_TEXT_PRIMARY), label_style=rio.TextStyle(color=COLOR_TEXT_SECONDARY)),
+            rio.TextInput(text=self.nickname, label="Nickname", width=10, style=rio.TextStyle(color=COLOR_TEXT_PRIMARY), label_style=rio.TextStyle(color=COLOR_TEXT_SECONDARY)),
+            rio.Button(
+                connect_button_text, 
+                on_press=self.do_connect_disconnect, 
+                # Attempt to use ButtonStyle for custom colors; fallback to Rio's named colors if needed
+                style=rio.ButtonStyle(
+                    background_color=COLOR_BUTTON_DANGER_BG if self.irc_manager.is_connected else COLOR_BUTTON_PRIMARY_BG,
+                    text_color=COLOR_BUTTON_TEXT
+                )
+                # As a fallback if ButtonStyle is not effective for BG/text: color=connect_button_color_name 
+            ),
             spacing=1,
-            key="connection_bar"
+            key="connection_bar",
+            background_color=COLOR_CONTAINER_BG,
+            padding=0.5,
+            border_radius=0.5,
         )
 
         channel_buttons = []

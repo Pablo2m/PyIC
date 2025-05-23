@@ -1,5 +1,5 @@
 import threading
-import time # For potential sleeps or timeouts if needed
+import time 
 import sys
 import socket # For socket.gaierror
 
@@ -7,12 +7,10 @@ import socket # For socket.gaierror
 try:
     from lib.pyic import irc_client
     from lib.irc_msg import irc_msg
-    # from lib.irc_codes import RPL_ENDOFMOTD # Not strictly needed here
 except ImportError:
     sys.path.insert(0, './lib')
     from pyic import irc_client
     from irc_msg import irc_msg
-    # from irc_codes import RPL_ENDOFMOTD
 
 
 class IRCManager:
@@ -44,98 +42,57 @@ class IRCManager:
 
     def _irc_loop(self):
         try:
-            # connect_to_server is called in irc_client.__init__
-            # The _handle_connection_success is called after irc_client is successfully initialized
-            # which means MOTD is processed (or attempted) by irc_client's connect_to_server.
-            
-            # Moved _handle_connection_success to be called after irc_client is confirmed connected
-            # and initial messages (like MOTD end) are processed by irc_client itself.
-            # For now, assuming irc_client's __init__ blocks until basic connection is up or fails.
-            # If irc_client.connected is True after init, we can proceed.
-            if not (self.irc_client and self.irc_client.connected):
-                 # This case should ideally be caught during irc_client instantiation in connect()
-                 # or immediately after if connect_to_server fails silently.
-                 if self.should_run_thread:
-                     self.ui_callback({'type': 'error', 'message': 'IRC client not connected after initialization.'})
-                 return
-
-            self._handle_connection_success() # Call this now that client is supposedly connected
+            self._handle_connection_success()
 
             while self.should_run_thread and self.irc_client:
-                try:
-                    msg_object = self.irc_client.getmsg()
-                except socket.timeout: # Example of a more specific error
-                    if self.should_run_thread: # Only report if we weren't trying to disconnect
-                        self.ui_callback({'type': 'warning', 'message': 'Connection timed out. Attempting to reconnect or verify connection.'})
-                        # Potentially add reconnect logic or just let it fail if further calls raise errors
-                    continue # Or break, depending on desired behavior
-                except Exception as e: # Catch other errors from getmsg (like connection closed)
-                    if self.should_run_thread:
-                        self.ui_callback({'type': 'error', 'message': f'Error receiving message: {str(e)}. Disconnecting.'})
-                    break # Exit loop on critical receive error
+                msg_object = self.irc_client.getmsg()
 
-
-                if msg_object is None: # Should be caught by Exception above if getmsg raises it
+                if msg_object is None:
                     if self.should_run_thread:
-                        self.ui_callback({'type': 'error', 'message': 'Connection lost unexpectedly (received None).'})
+                        self.ui_callback({'type': 'error', 'message': 'Connection lost unexpectedly.'})
                     break
 
-                # Handle CTCP PING explicitly
                 if msg_object.ctcp:
                     ctcp_parts = msg_object.ctcp_msg.upper().split(" ", 1)
                     ctcp_command = ctcp_parts[0]
-                    # ctcp_args_upper = ctcp_parts[1] if len(ctcp_parts) > 1 else "" # Not used directly for PING reply arg
-
+                    
                     if ctcp_command == "PING":
-                        # Respond to CTCP PING
-                        # The sender of the PRIVMSG (msg_object.by) is who we reply to.
-                        # The content of the PING (argument) should be sent back in the PONG.
                         reply_arg = msg_object.ctcp_msg.split(" ", 1)[1] if " " in msg_object.ctcp_msg else ""
-                        # CTCP PONG reply is sent via NOTICE
-                        # Format: NOTICE <target_nick> :\x01PONG <timestamp_or_arg>\x01
-                        pong_reply_string = f"NOTICE {msg_object.by} :\x01PONG {reply_arg}\x01\r\n"
+                        pong_reply = f"NOTICE {msg_object.by} :\x01PONG {reply_arg}\x01\r\n" # Corrected EOL
                         try:
-                            if self.irc_client and self.irc_client.sock:
-                                self.irc_client.sock.sendall(pong_reply_string.encode('utf-8', 'ignore'))
-                            # Optionally log this event to UI if needed for debugging
-                            # self.ui_callback({'type': 'debug', 'message': f"Responded to CTCP PING from {msg_object.by} with PONG {reply_arg}"})
+                            if self.irc_client.sock: # Check if socket still exists
+                                self.irc_client.sock.sendall(pong_reply.encode('utf-8', 'ignore'))
                         except Exception as e:
                             self.ui_callback({'type': 'error', 'message': f"Failed to send CTCP PONG: {e}"})
-                        continue # Don't process this PRIVMSG further as a normal message for UI
-
+                        continue 
                     elif ctcp_command == "VERSION":
-                        # This is already handled by pyic.getmsg() calling self.irc_client.sendVer()
-                        # No action needed here, but we acknowledge it.
-                        # self.ui_callback({'type': 'debug', 'message': f"CTCP VERSION request from {msg_object.by} handled by pyic."})
-                        # It will still be passed to UI as a CTCP message, which is fine.
-                        pass # Let it fall through to the UI callback
+                        # Already handled by pyic.getmsg()
+                        pass
 
                 event = {
                     'type': msg_object.type,
                     'by': msg_object.by,
                     'origin': msg_object.origin,
                     'to': msg_object.to,
-                    'message': msg_object.msg, # This is the full message part, e.g., "\x01ACTION dances\x01" for CTCP
+                    'message': msg_object.msg,
                     'raw': msg_object.raw,
-                    'is_private': getattr(msg_object, 'private', False), # pyic's irc_msg doesn't set this explicitly, but good to have
+                    'is_private': msg_object.private,
                     'ctcp': msg_object.ctcp,
-                    'ctcp_msg': msg_object.ctcp_msg if msg_object.ctcp else "", # This is the inner content, e.g. "ACTION dances"
-                    'params': getattr(msg_object, 'params', []), # Pass params if available
-                    'kicked': getattr(msg_object, 'kicked', None) # Pass kicked if available
+                    'ctcp_msg': msg_object.ctcp_msg if msg_object.ctcp else "",
+                    'params': getattr(msg_object, 'params', []),
+                    'kicked': getattr(msg_object, 'kicked', None)
                 }
                 self.ui_callback(event)
 
-        except ConnectionRefusedError: # This might be redundant if connect() handles it, but good for loop-time issues
+        except ConnectionRefusedError:
             self.ui_callback({'type': 'error', 'message': f"Connection refused by {self.server}:{self.port}"})
         except socket.gaierror:
-            self.ui_callback({'type': 'error', 'message': f"Could not resolve server name: {self.server}. Please check the address and your network."})
-        except ConnectionRefusedError: # More specific than generic Exception for this
-            self.ui_callback({'type': 'error', 'message': f"Connection actively refused by the server {self.server}:{self.port}."})
-        except socket.timeout: # If connect call itself times out
-             self.ui_callback({'type': 'error', 'message': f"Connection attempt to {self.server}:{self.port} timed out."})
-        except Exception as e: # Catch-all for other errors during the loop or setup
-            if self.should_run_thread: # Only show error if not part of a deliberate disconnect
-                self.ui_callback({'type': 'error', 'message': f"An unexpected error occurred in IRC loop: {str(e)}"})
+            self.ui_callback({'type': 'error', 'message': f"Could not resolve server: {self.server}"})
+        except socket.timeout: # Catch explicit timeout during getmsg or initial connection parts
+            self.ui_callback({'type': 'error', 'message': f"Connection timed out to {self.server}"})
+        except Exception as e:
+            if self.should_run_thread:
+                self.ui_callback({'type': 'error', 'message': f"IRC loop error: {str(e)}"})
         finally:
             self.is_connected = False
             self.should_run_thread = False
@@ -145,8 +102,6 @@ class IRCManager:
                 except Exception:
                     pass
             self.irc_client = None
-            # Avoid double "Disconnected" if disconnect was called explicitly and already sent one
-            # self.ui_callback({'type': 'status', 'message': 'Disconnected.'})
 
 
     def connect(self, nick: str, server: str, port: int, channels: list[str] = None, ssl_conn: bool = False, user_password: str = None, server_password: str = None):
@@ -161,13 +116,10 @@ class IRCManager:
 
         self.ui_callback({'type': 'status', 'message': f"Connecting to {server}:{port} as {nick}..."})
         
-        # It's tricky to send "Resolving server..." then "Attempting connection..." separately
-        # because irc_client's __init__ does it all. We can only catch errors from it.
         try:
-            # Attempt to create and connect the IRC client
             self.irc_client = irc_client(
                 nick=nick,
-                server=server, # This will be resolved and connected to within irc_client
+                server=server,
                 port=port,
                 ssl=ssl_conn,
                 username=nick,
@@ -175,29 +127,20 @@ class IRCManager:
                 passwd=user_password,
                 serverpasswd=server_password
             )
-            # If irc_client constructor finishes but connection failed (e.g. bad password, nick in use before MOTD)
-            # pyic's connect_to_server might raise an exception or just not set connected.
-            # We rely on _irc_loop to check self.irc_client.connected or handle getmsg errors.
-            if not self.irc_client.connected: # Check if pyic's internal connected flag is set
-                # This path might be hard to reach if irc_client constructor raises error on failure
-                self.ui_callback({'type': 'error', 'message': f"Connection to {server} failed. Please check server details, credentials, and network."})
-                self.irc_client = None
-                return False
-
-        except socket.gaierror: # DNS resolution error
-            self.ui_callback({'type': 'error', 'message': f"Could not resolve server: {server}. Check the address."})
+        except socket.gaierror as e:
+            self.ui_callback({'type': 'error', 'message': f"Could not resolve server name: {server}. Details: {e}"})
             self.irc_client = None
             return False
-        except ConnectionRefusedError:
-            self.ui_callback({'type': 'error', 'message': f"Connection refused by {server}:{port}."})
+        except ConnectionRefusedError as e:
+            self.ui_callback({'type': 'error', 'message': f"Connection actively refused by server: {server}:{port}. Details: {e}"})
             self.irc_client = None
             return False
-        except socket.timeout:
-            self.ui_callback({'type': 'error', 'message': f"Connection attempt to {server}:{port} timed out."})
+        except socket.timeout as e: # Catch connection timeout
+            self.ui_callback({'type': 'error', 'message': f"Connection attempt timed out to {server}:{port}. Details: {e}"})
             self.irc_client = None
             return False
-        except Exception as e: # Other errors during irc_client instantiation (e.g. SSL issues not caught above)
-            self.ui_callback({'type': 'error', 'message': f"Failed to initialize connection: {str(e)}"})
+        except Exception as e: # Catch other potential errors from irc_client.__init__
+            self.ui_callback({'type': 'error', 'message': f"Failed to connect: {str(e)}"})
             self.irc_client = None
             return False
 
@@ -216,35 +159,20 @@ class IRCManager:
 
         if self.irc_client:
             try:
-                if hasattr(self.irc_client, 'sock') and self.irc_client.sock:
+                if hasattr(self.irc_client, 'sock') and self.irc_client.sock: # Check if socket exists
                      self.irc_client.quit("Rio IRC Client disconnecting")
             except Exception as e:
-                self.ui_callback({'type': 'warning', 'message': f"Error sending QUIT: {e}. Forcing disconnect."})
-            # No finally self.irc_client = None here, _irc_loop's finally handles it
+                # This might happen if socket is already closed, not critical for disconnect sequence
+                self.ui_callback({'type': 'warning', 'message': f"Error sending QUIT (socket may be closed): {e}"})
         
         if self.receive_thread and self.receive_thread.is_alive():
-            self.receive_thread.join(timeout=3.0)
+            self.receive_thread.join(timeout=3.0) # Wait for the thread to finish
         
-        # If the thread never started or died quickly, ensure disconnected state is reported
-        if self.is_connected or self.irc_client is not None:
+        if self.is_connected or self.irc_client is not None: # If still considered connected or client exists
             self.is_connected = False
-            self.irc_client = None
+            self.irc_client = None # Ensure client is None
             self.ui_callback({'type': 'status', 'message': 'Disconnected.'})
 
-
-    def send_channel_message(self, channel: str, message: str):
-        if self.is_connected and self.irc_client:
-            self.irc_client.sendmsg(channel, message)
-            return True
-        self.ui_callback({'type': 'error', 'message': 'Not connected. Cannot send message.'})
-        return False
-
-    def send_private_message(self, nick: str, message: str): # Kept for direct use
-        if self.is_connected and self.irc_client:
-            self.irc_client.sendmsg(nick, message)
-            return True
-        self.ui_callback({'type': 'error', 'message': 'Not connected. Cannot send message.'})
-        return False
 
     def process_input(self, target: str, user_input: str):
         if not self.is_connected or not self.irc_client:
@@ -258,11 +186,10 @@ class IRCManager:
         if command.startswith("/"):
             if command == "/me":
                 if args:
-                    ctcp_action_string = f"\x01ACTION {args}\x01"
+                    ctcp_action_string = f"\x01ACTION {args}\x01" # Corrected CTCP format
                     self.irc_client.sendmsg(target, ctcp_action_string)
-                    # Callback for UI to display own action optimistically
                     self.ui_callback({
-                        'type': 'self_action', # Distinguish from incoming actions
+                        'type': 'self_action', 
                         'by': self.nick, 
                         'to': target, 
                         'message': args 
@@ -276,8 +203,6 @@ class IRCManager:
                 if args:
                     new_nickname = args.strip()
                     self.irc_client.change_nick(new_nickname)
-                    # Server will send a NICK message back, which main.py handles.
-                    # We can also send an optimistic status message.
                     self.ui_callback({'type': 'status', 'message': f"Attempting to change nick to: {new_nickname}"})
                     return True
                 else:
@@ -294,37 +219,52 @@ class IRCManager:
                     self.ui_callback({'type': 'error', 'message': 'Usage: /whois <nickname>'})
                     return False
             
-            # Add other slash commands here in the future e.g. /join, /part, /query
             elif command == "/join":
                  if args:
-                    self.join_channel_action(args.strip()) # Use existing method
+                    self.join_channel_action(args.strip())
                     return True
                  else:
                     self.ui_callback({'type': 'error', 'message': 'Usage: /join <#channel>'})
                     return False
             elif command == "/part":
                  if args:
-                    self.part_channel_action(args.strip()) # Use existing method
+                    self.part_channel_action(args.strip())
                     return True
-                 else: # Part current channel if no args
+                 else: 
                     if target and (target.startswith("#") or target.startswith("&")):
                         self.part_channel_action(target)
                         return True
                     else:
                         self.ui_callback({'type': 'error', 'message': 'Usage: /part <#channel> or use in a channel context.'})
                         return False
-
-
-            else: # Unknown slash command
+            elif command == "/close": # Added /close command
+                if target: 
+                    self.ui_callback({'type': 'client_command_close_context', 'target_context_id': target})
+                    return True
+                else:
+                    self.ui_callback({'type': 'error', 'message': 'No current context to close.'})
+                    return False
+            else: 
                 self.ui_callback({'type': 'error', 'message': f"Unknown command: {command}"})
                 return False
         
-        else: # Regular message
+        else: 
             self.irc_client.sendmsg(target, user_input)
-            # UI currently handles optimistic display of own messages.
-            # If we wanted manager to confirm, add a callback here:
-            # self.ui_callback({'type': 'self_message', 'by': self.nick, 'to': target, 'message': user_input})
             return True
+
+    def send_channel_message(self, channel: str, message: str):
+        if self.is_connected and self.irc_client:
+            self.irc_client.sendmsg(channel, message)
+            return True
+        self.ui_callback({'type': 'error', 'message': 'Not connected. Cannot send message.'})
+        return False
+
+    def send_private_message(self, nick: str, message: str):
+        if self.is_connected and self.irc_client:
+            self.irc_client.sendmsg(nick, message)
+            return True
+        self.ui_callback({'type': 'error', 'message': 'Not connected. Cannot send message.'})
+        return False
 
     def join_channel_action(self, channel: str):
         if self.is_connected and self.irc_client:
@@ -336,7 +276,7 @@ class IRCManager:
 
     def part_channel_action(self, channel: str):
         if self.is_connected and self.irc_client:
-            self.irc_client.quit_channel(channel)
+            self.irc_client.quit_channel(channel) # pyic.py method name
             self.ui_callback({'type': 'status', 'message': f"Attempting to part channel: {channel}"})
             return True
         self.ui_callback({'type': 'error', 'message': 'Not connected. Cannot part channel.'})
@@ -344,7 +284,7 @@ class IRCManager:
 
     def send_raw_command(self, command: str):
         if self.is_connected and self.irc_client and hasattr(self.irc_client, 'sock') and self.irc_client.sock:
-            self.irc_client.sock.send((command + "\r\n").encode('utf-8'))
+            self.irc_client.sock.sendall((command + "\r\n").encode('utf-8', 'ignore')) # Use sendall for robustness
             self.ui_callback({'type': 'status', 'message': f"Sent RAW: {command}"})
             return True
         self.ui_callback({'type': 'error', 'message': 'Not connected. Cannot send raw command.'})
